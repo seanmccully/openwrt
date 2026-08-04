@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean McCully <sean_mccully@yahoo.com>
+Date: Tue, 4 Aug 2026 13:39:05 -0700
+Subject: [PATCH] block: partitions: efi: bound partition name length for OF lookup
+
+KASAN reports a slab-out-of-bounds read in find_partition_of_node()
+(via mmc_rescan) when scanning GPT entries for an OF partition match.
+
+The size argument of utf16_le_to_7bit() is the number of UTF-16LE
+symbols to read from @in, not the capacity of @out.  volname is
+char[64], so this asks for 63 symbols (126 bytes), but
+gpt_entry::partition_name is
+
+	__le16 partition_name[72/sizeof(__le16)];	/* block/partitions/efi.h */
+
+i.e. 36 symbols / 72 bytes.  Every call therefore reads 27 __le16 past
+the end of the name field.  For all but the last partition entry the
+surplus lands inside the following gpt_entry and merely corrupts
+volname; for the last entry it runs off the end of the array
+alloc_read_gpt_entries() allocated.
+
+Bound the symbol count by the size of partition_name as well.
+
+Signed-off-by: Sean McCully <sean_mccully@yahoo.com>
+---
+ block/partitions/efi.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/block/partitions/efi.c b/block/partitions/efi.c
+index ac2c7d3c4993..62dcb6b233b6 100644
+--- a/block/partitions/efi.c
++++ b/block/partitions/efi.c
+@@ -700,13 +700,15 @@ static struct device_node *find_partition_of_node(struct device_node *partitions
+ {
+ 	char volname[64], partuuid[UUID_STRING_LEN + 1];
+ 	const char *uuid, *name;
++	unsigned int label_max;
+ 
+ 	if (!partitions_np ||
+ 	    !of_device_is_compatible(partitions_np, "gpt-partitions"))
+ 		return NULL;
+ 
+ 	efi_guid_to_str(&ptes->unique_partition_guid, partuuid);
+-	utf16_le_to_7bit(ptes->partition_name, ARRAY_SIZE(volname) - 1, volname);
++	label_max = min(ARRAY_SIZE(volname) - 1, ARRAY_SIZE(ptes->partition_name));
++	utf16_le_to_7bit(ptes->partition_name, label_max, volname);
+ 
+ 	for_each_available_child_of_node_scoped(partitions_np, np) {
+ 		if (!of_property_read_string(np, "uuid", &uuid) &&
