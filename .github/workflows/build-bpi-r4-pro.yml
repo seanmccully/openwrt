@@ -1,0 +1,153 @@
+name: Build BPI-R4 Pro firmware
+
+on:
+  push:
+    branches:
+      - bpi-r4-pro
+      - bpi-r4-pro-4e
+      - bpi-r4-pro-4e-sfp
+      - edge
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: BPI-R4 Pro profile to build
+        required: true
+        default: bananapi_bpi-r4-pro
+        type: choice
+        options:
+          - bananapi_bpi-r4-pro
+          - bananapi_bpi-r4-pro-4e
+          - bananapi_bpi-r4-pro-4e-sfp
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.profile || 'bananapi_bpi-r4-pro' }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ inputs.profile || 'bananapi_bpi-r4-pro' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+
+    env:
+      PROFILE: ${{ inputs.profile || 'bananapi_bpi-r4-pro' }}
+      TARGET_DIR: bin/targets/mediatek/filogic
+
+    steps:
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/local/.ghcup
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/share/swift
+          df -h /
+
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            bison \
+            build-essential \
+            clang \
+            file \
+            flex \
+            gawk \
+            gettext \
+            git \
+            libncurses5-dev \
+            libssl-dev \
+            python3 \
+            python3-setuptools \
+            rsync \
+            subversion \
+            swig \
+            time \
+            unzip \
+            wget \
+            zlib1g-dev
+
+      - name: Configure profile
+        run: |
+          case "$PROFILE" in
+            bananapi_bpi-r4-pro|bananapi_bpi-r4-pro-4e|bananapi_bpi-r4-pro-4e-sfp)
+              ;;
+            *)
+              echo "::error::Unsupported profile: $PROFILE"
+              exit 1
+              ;;
+          esac
+
+          cat > .config <<EOF
+          CONFIG_DEVEL=y
+          CONFIG_BPF_TOOLCHAIN_HOST=y
+          CONFIG_TARGET_mediatek=y
+          CONFIG_TARGET_mediatek_filogic=y
+          CONFIG_TARGET_mediatek_filogic_DEVICE_${PROFILE}=y
+          CONFIG_TARGET_ROOTFS_INITRAMFS=y
+          EOF
+
+          make defconfig
+          ./scripts/diffconfig.sh
+
+      - name: Build firmware
+        run: |
+          if ! make -j"$(nproc)" BUILD_LOG=1; then
+            make -j1 V=s BUILD_LOG=1
+          fi
+          df -h /
+
+      - name: Collect firmware and metadata
+        run: |
+          artifact_dir=ci-artifacts
+          mkdir -p "$artifact_dir"
+
+          find "$TARGET_DIR" -maxdepth 1 -type f \
+            -name "*${PROFILE}*" -exec cp -v -- {} "$artifact_dir/" \;
+
+          if test -z "$(find "$artifact_dir" -maxdepth 1 -type f \
+            -name "*${PROFILE}*" -print -quit)"; then
+            echo "::error::No firmware images were generated for $PROFILE"
+            exit 1
+          fi
+
+          for metadata in \
+            config.buildinfo feeds.buildinfo profiles.json version.buildinfo; do
+            if test -f "$TARGET_DIR/$metadata"; then
+              cp -v -- "$TARGET_DIR/$metadata" "$artifact_dir/"
+            fi
+          done
+
+          ./scripts/diffconfig.sh > "$artifact_dir/diffconfig.txt"
+          git rev-parse HEAD > "$artifact_dir/source-commit.txt"
+          (
+            cd "$artifact_dir"
+            find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 |
+              sort -z | xargs -0 sha256sum > SHA256SUMS
+          )
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v7
+        with:
+          name: >-
+            openwrt-mediatek-filogic-${{ env.PROFILE }}-${{ github.sha }}
+          path: ci-artifacts/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: >-
+            openwrt-mediatek-filogic-${{ env.PROFILE }}-${{ github.sha }}-logs
+          path: |
+            .config
+            logs/
+          if-no-files-found: warn
+          retention-days: 7
