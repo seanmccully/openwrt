@@ -17,13 +17,14 @@ defined as reserved-memory child node.
 
 Signed-off-by: Lorenzo Bianconi <lorenzo@kernel.org>
 ---
- drivers/net/ethernet/mediatek/mtk_wed_mcu.c | 34 +++++++++++++++++----
- drivers/net/ethernet/mediatek/mtk_wed_wo.h  |  3 +-
- 2 files changed, 30 insertions(+), 7 deletions(-)
+ drivers/net/ethernet/mediatek/mtk_wed_mcu.c | 31 ++++++++++++++++++++++-------
+ 1 file changed, 24 insertions(+), 7 deletions(-)
 
+diff --git a/drivers/net/ethernet/mediatek/mtk_wed_mcu.c b/drivers/net/ethernet/mediatek/mtk_wed_mcu.c
+index a19a2aa968bd..90e8b90752ee 100644
 --- a/drivers/net/ethernet/mediatek/mtk_wed_mcu.c
 +++ b/drivers/net/ethernet/mediatek/mtk_wed_mcu.c
-@@ -32,14 +32,25 @@ static struct mtk_wed_wo_memory_region m
+@@ -32,14 +32,25 @@ static struct mtk_wed_wo_memory_region mem_region[] = {
  	},
  };
  
@@ -53,7 +54,7 @@ Signed-off-by: Lorenzo Bianconi <lorenzo@kernel.org>
  }
  
  static struct sk_buff *
-@@ -313,8 +324,14 @@ mtk_wed_mcu_load_firmware(struct mtk_wed
+@@ -313,8 +324,14 @@ mtk_wed_mcu_load_firmware(struct mtk_wed_wo *wo)
  	u32 val, boot_cr;
  	int ret, i;
  
@@ -68,12 +69,9 @@ Signed-off-by: Lorenzo Bianconi <lorenzo@kernel.org>
  		ret = mtk_wed_get_reserved_memory_region(wo->hw, mem_region[i].name,
  							 &mem_region[i]);
  		if (ret)
-@@ -364,17 +381,17 @@ mtk_wed_mcu_load_firmware(struct mtk_wed
- 		boot_cr = MTK_WO_MCU_CFG_LS_WA_BOOT_ADDR_ADDR;
- 	else
+@@ -366,11 +383,11 @@ mtk_wed_mcu_load_firmware(struct mtk_wed_wo *wo)
  		boot_cr = MTK_WO_MCU_CFG_LS_WM_BOOT_ADDR_ADDR;
--	wo_w32(boot_cr, mem_region[MTK_WED_WO_REGION_EMI].phy_addr >> 16);
-+	wo_w32(wo, boot_cr, mem_region[MTK_WED_WO_REGION_EMI].phy_addr >> 16);
+ 	wo_w32(boot_cr, mem_region[MTK_WED_WO_REGION_EMI].phy_addr >> 16);
  	/* wo firmware reset */
 -	wo_w32(MTK_WO_MCU_CFG_LS_WF_MCCR_CLR_ADDR, 0xc00);
 +	wo_w32(wo, MTK_WO_MCU_CFG_LS_WF_MCCR_CLR_ADDR, 0xc00);
